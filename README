@@ -273,6 +273,35 @@ DESCRIPTION
     
     To point somewhere else if you so desire.
     
+
+    PKCS11
+    ======
+
+    The current version supports pkcs11 tokens for storing ssh keys. Only
+    Linux systems are supported at this stage. In order to use this
+    feature, you need to upload your private key to the token and to
+    create an identity file in the right identity directory. The content
+    of that file should be the one produced by the "ssh-add -L" command
+    after adding the pkcs11 token manually to the agent for the first time
+    (by using the "ssh-add -s pkcs11_library.so" command).
+
+    Once that file is created, you can use ssh-ident normally. You should
+    be asked the token access password when you are trying to access the
+    identity associated to it.
+
+    Please, notice that due to the limitations of the pkcs11 functionality
+    in ssh-add, once that you add a token to an identity, all the keys
+    that are in that token are available to the instance of the ssh agent.
+
+    Likewise, when using pkcs11 tokens, you will see that the token is
+    removed and re-added to the agent from time to time. This is needed
+    because sometimes the agent has expired the key and, in order to
+    re-read it, the only ways is unplugging and plugging the token
+    again. As it is not possible to determine the current status,
+    sometimes ssh-ident tries to remove a token that it is not
+    there. Please, ignore any message related to the token removal from
+    the agent.
+
     
     BUILDING A DEBIAN PACKAGE
     =========================

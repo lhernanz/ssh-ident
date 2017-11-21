@@ -269,6 +269,35 @@ You can also redefine:
 To point somewhere else if you so desire.
 
 
+PKCS11
+======
+
+The current version supports pkcs11 tokens for storing ssh keys. Only
+Linux systems are supported at this stage. In order to use this
+feature, you need to upload your private key to the token and to
+create an identity file in the right identity directory. The content
+of that file should be the one produced by the "ssh-add -L" command
+after adding the pkcs11 token manually to the agent for the first time
+(by using the "ssh-add -s pkcs11_library.so" command).
+
+Once that file is created, you can use ssh-ident normally. You should
+be asked the token access password when you are trying to access the
+identity associated to it.
+
+Please, notice that due to the limitations of the pkcs11 functionality
+in ssh-add, once that you add a token to an identity, all the keys
+that are in that token are available to the instance of the ssh agent.
+
+Likewise, when using pkcs11 tokens, you will see that the token is
+removed and re-added to the agent from time to time. This is needed
+because sometimes the agent has expired the key and, in order to
+re-read it, the only ways is unplugging and plugging the token
+again. As it is not possible to determine the current status,
+sometimes ssh-ident tries to remove a token that it is not
+there. Please, ignore any message related to the token removal from
+the agent.
+
+
 BUILDING A DEBIAN PACKAGE
 =========================
 
@@ -308,6 +337,7 @@ CREDITS
 - Carl Drougge, https://www.github.com/drougge, CVE-2016-0777 fix,
   fix for per user config files, and use /bin/env instead of python
   path.
+
 """
 
 from __future__ import print_function
@@ -698,6 +728,19 @@ class AgentManager(object):
     else:
       print("All keys already loaded", file=sys.stderr, loglevel=LOG_INFO)
 
+  def IsPKCS11Library(self, keyfile):
+    """Determines if a Key File is in reality a pkcs11 library. This function has a 
+    simplistic way of identifying libraries and will only work in Linux systems.
+
+    Args:
+      keys: The key file argument to analyze as returned by ssh-keygen -l
+
+    Returns:
+      a boolean value. True in case the key is in reality a library.
+    """
+    # TODO: extend the implementation to support additional operating systems
+    return keyfile.find(".so") > 1
+
   def FindUnloadedKeys(self, keys):
     """Determines which keys have not been loaded yet.
 
@@ -710,8 +753,14 @@ class AgentManager(object):
     loaded = set(self.GetLoadedKeys())
     toload = set()
     for key, config in keys.items():
+
+      print("Processing key {0}".format(key), loglevel=LOG_DEBUG)
+
       if "pub" not in config:
         continue
+      if self.IsPKCS11Library(self.GetPublicKeyFile(config["pub"])):
+        # There is no private file for pkcs11 keys.
+        config["priv"] = config["pub"]
       if "priv" not in config:
         continue
 
@@ -728,12 +777,35 @@ class AgentManager(object):
     Args:
       keys: iterable of strings, each string a path to a key to load.
     """
-    keys = " ".join(keys)
+    file_keys = \
+    " ".join([x for x in keys
+              if not self.IsPKCS11Library(self.GetPublicKeyFile(x))])
+
     options = self.config.Get("SSH_ADD_OPTIONS").get(
         self.identity, self.config.Get("SSH_ADD_DEFAULT_OPTIONS"))
     console = GetSessionTty()
-    self.RunShellCommandInAgent(
-        self.agent_file, "ssh-add {0} {1}".format(options, keys),
+
+    if len(file_keys) > 0:
+      print("Loading key '{0}' in agent".format(file_keys), loglevel=LOG_DEBUG)
+
+      self.RunShellCommandInAgent(
+        self.agent_file, "ssh-add {0} {1}".format(options, file_keys),
+        stdout=console, stdin=console)
+
+    for pkcs11 in [self.GetPublicKeyFile(x) for x in keys
+                   if self.IsPKCS11Library(self.GetPublicKeyFile(x))]:
+      # When a pkcs11 key expires, it is removed from the agent but
+      # the token is not removed from the agent.  Trying to add the
+      # token again will fail. Therefore, we need to try to remove the
+      # card from the agent before adding it again, as ssh-add does
+      # not offer any way to check if a token is loaded or not.
+      print("Adding pkcs11 library {0}".format(pkcs11), file=sys.stderr,
+          loglevel=LOG_DEBUG)
+      self.RunShellCommandInAgent(
+        self.agent_file, "ssh-add {0} -e {1}".format(options, pkcs11),
+        stdout=console, stdin=console)
+      self.RunShellCommandInAgent(
+        self.agent_file, "ssh-add {0} -s {1}".format(options, pkcs11),
         stdout=console, stdin=console)
 
   def GetLoadedKeys(self):
@@ -754,16 +826,32 @@ class AgentManager(object):
   @staticmethod
   def GetPublicKeyFingerprint(key):
     """Returns the fingerprint of a public key as a string."""
+    return AgentManager.GetPublicKeyData(key)["fingerprint"]
+
+  @staticmethod
+  def GetPublicKeyFile(key):
+    """Returns the file name of a public key as a string."""
+    return AgentManager.GetPublicKeyData(key)["file"]
+  
+  @staticmethod
+  def GetPublicKeyData(key):
+    """Returns the information from a public key file as returned by 
+    ssh-keygen -l
+    Returns:
+      An dict with the four elements of the key: length, fingerprint,
+      file and protocol
+    """
     retval, stdout = AgentManager.RunShellCommand(
         "ssh-keygen -l -f {0} |tr -s ' '".format(key))
     if retval:
       return None
 
     try:
-      _, fingerprint, _ = stdout.decode("utf-8").split(" ", 2)
+      length, fingerprint, file, protocol = stdout.decode("utf-8").split(" ", 3)
     except ValueError:
       return None
-    return fingerprint
+    return {"length": length, "fingerprint": fingerprint,
+            "file": file, "protocol": protocol}
 
   @staticmethod
   def GetAgentFile(path, identity):
