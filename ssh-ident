@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # vim: tabstop=2 shiftwidth=2 expandtab
 """Start and use ssh-agent and load identities as necessary.
 
@@ -39,7 +39,8 @@ Installation
 ============
 
 All you need to run ssh-ident is a standard installation of python >= 2.6,
-python > 3 is supported.
+python > 3 is supported. Please, notice that python 2.x is deprecated. All the
+new changes are only tested in python 3
 
 If your system has wget and are impatient to use it, you can install
 ssh-ident with two simple commands:
@@ -122,14 +123,14 @@ to solve the problem:
     rsync -e '/path/to/ssh-ident' ...
     scp -S '/path/to/ssh-ident' ...
 
-4) Replace the real ssh on the system with ssh-ident, and set the 
+4) Replace the real ssh on the system with ssh-ident, and set the
    BINARY_SSH configuration parameter to the original value.
 
    On Debian based system, you can make this change in a way that
    will survive automated upgrades and audits by running:
 
      dpkg-divert --divert /usr/bin/ssh.ssh-ident --rename /usr/bin/ssh
-   
+
    After which, you will need to use:
 
      BINARY_SSH="/usr/bin/ssh.ssh-ident"
@@ -206,6 +207,11 @@ To have multiple identities, all I have to do is:
   # keys from remaining in memory for too long.
   SSH_ADD_DEFAULT_OPTIONS = "-t 7200"
 
+  # Which options to use when creating a new agent. This is mainly useful to
+  # add additional paths to the agent that are whitelisted to contain pkcs11
+  # libraries
+  SSH_AGENT_DEFAULT_OPTIONS = ""
+
   # Output verbosity
   # valid values are: LOG_ERROR, LOG_WARN, LOG_INFO, LOG_DEBUG
   VERBOSITY = LOG_INFO
@@ -272,37 +278,35 @@ To point somewhere else if you so desire.
 PKCS11
 ======
 
-The current version supports pkcs11 tokens for storing ssh keys. Only
-Linux systems are supported at this stage. In order to use this
-feature, you need to upload your private key to the token and to
-create an identity file in the right identity directory. The content
-of that file should be the one produced by the "ssh-add -L" command
-after adding the pkcs11 token manually to the agent for the first time
-(by using the "ssh-add -s pkcs11_library.so" command).
+The current version supports pkcs11 tokens for storing ssh keys. Only Linux and
+MacOS systems are supported at this stage. In order to use this feature, you
+need to upload your private key to the token and to create an identity file in
+the right identity directory. The content of that file should be the one
+produced by the "ssh-add -L" command after adding the pkcs11 token manually to
+the agent for the first time (by using the "ssh-add -s pkcs11_library.so"
+command).
 
-Once that file is created, you can use ssh-ident normally. You should
-be asked the token access password when you are trying to access the
-identity associated to it.
+Once that file is created, you can use ssh-ident normally. You should be asked
+the token access password when you are trying to access the identity associated
+to it.
 
-Please, notice that due to the limitations of the pkcs11 functionality
-in ssh-add, once that you add a token to an identity, all the keys
-that are in that token are available to the instance of the ssh agent.
+Please, notice that due to the limitations of the pkcs11 functionality in
+ssh-add, once that you add a token to an identity, all the keys that are in
+that token are available to the instance of the ssh agent.
 
-Likewise, when using pkcs11 tokens, you will see that the token is
-removed and re-added to the agent from time to time. This is needed
-because sometimes the agent has expired the key and, in order to
-re-read it, the only ways is unplugging and plugging the token
-again. As it is not possible to determine the current status,
-sometimes ssh-ident tries to remove a token that it is not
-there. Please, ignore any message related to the token removal from
-the agent.
+Likewise, when using pkcs11 tokens, you will see that the token is removed and
+re-added to the agent from time to time. This is needed because sometimes the
+agent has expired the key and, in order to re-read it, the only ways is
+unplugging and plugging the token again. As it is not possible to determine the
+current status, sometimes ssh-ident tries to remove a token that it is not
+there. Please, ignore any message related to the token removal from the agent.
 
 
 BUILDING A DEBIAN PACKAGE
 =========================
 
-If you need to use ssh-ident on a debian / ubuntu / or any other
-derivate, you can now build debian packages.
+If you need to use ssh-ident on a debian / ubuntu / or any other derivate, you
+can now build debian packages.
 
   1. Make sure you have devscripts installed:
 
@@ -337,6 +341,7 @@ CREDITS
 - Carl Drougge, https://www.github.com/drougge, CVE-2016-0777 fix,
   fix for per user config files, and use /bin/env instead of python
   path.
+- Luis Hernanz, https://www.github.com/drougge, for pkcs11 support.
 
 """
 
@@ -464,6 +469,11 @@ class Config(object):
       "MATCH_PATH": [],
       "MATCH_ARGV": [],
 
+      # ssh-agent default options. This is mostly useful to add additional
+      # paths where shared PCKS11 libraries can be loaded by using the command
+      # '-P'
+      "SSH_AGENT_DEFAULT_OPTIONS": None,
+
       # Dictionary with identity as a key, allows to specify
       # per identity options when using ssh-add.
       "SSH_ADD_OPTIONS": {},
@@ -512,10 +522,9 @@ class Config(object):
     if parameter in self.defaults:
       return self.Expand(self.defaults[parameter])
 
-    print(
-        "Parameter '{0}' needs to be defined in "
-        "config file or defaults".format(parameter), file=sys.stderr,
-        loglevel=LOG_ERROR)
+    print("Parameter '{0}' needs to be defined in "
+          "config file or defaults".format(parameter), file=sys.stderr,
+          loglevel=LOG_ERROR)
     sys.exit(2)
 
   def Set(self, parameter, value):
@@ -607,8 +616,8 @@ def FindKeys(identity, config):
 
   if not found:
     print("Warning: no keys found for identity {0} in:".format(identity),
-        file=sys.stderr,
-        loglevel=LOG_WARN)
+          file=sys.stderr,
+          loglevel=LOG_WARN)
     print(directories, file=sys.stderr, loglevel=LOG_WARN)
 
   return found
@@ -712,7 +721,7 @@ class AgentManager(object):
     self.config = config
     self.ssh_config = sshconfig
     self.agents_path = os.path.abspath(config.Get("DIR_AGENTS"))
-    self.agent_file = self.GetAgentFile(self.agents_path, self.identity)
+    self.agent_file = self.GetAgentFileAndLaunchAgent()
 
   def LoadUnloadedKeys(self, keys):
     """Loads all the keys specified that are not loaded.
@@ -728,18 +737,29 @@ class AgentManager(object):
     else:
       print("All keys already loaded", file=sys.stderr, loglevel=LOG_INFO)
 
-  def IsPKCS11Library(self, keyfile):
-    """Determines if a Key File is in reality a pkcs11 library. This function has a 
-    simplistic way of identifying libraries and will only work in Linux systems.
+  @staticmethod
+  def IsPKCS11Library(keyfile):
+    """Determines if a Key File is in reality a pkcs11 library. This function has a
+    simplistic way of identifying libraries based on looking at the name
+    extension. If the extension is 'so' or 'dylib', it will be considered a
+    shared library. Notice that the ssh agent will only load libraries in
+    specific system paths. In order to add additional paths, the '-P' option
+    can be added to the ssh-agent command.
 
     Args:
       keys: The key file argument to analyze as returned by ssh-keygen -l
 
     Returns:
       a boolean value. True in case the key is in reality a library.
+
     """
     # TODO: extend the implementation to support additional operating systems
-    return keyfile.find(".so") > 1
+    pkcs11_library = False
+    for file in keyfile.split(","):
+      if re.search(".so$|.dylib$", file.strip()):
+        print("Detected pkcs11 library in path component: '{0}'".format(file), file=sys.stderr, loglevel=LOG_DEBUG)
+        pkcs11_library = True
+    return pkcs11_library
 
   def FindUnloadedKeys(self, keys):
     """Determines which keys have not been loaded yet.
@@ -754,7 +774,7 @@ class AgentManager(object):
     toload = set()
     for key, config in keys.items():
 
-      print("Processing key {0}".format(key), loglevel=LOG_DEBUG)
+      print("Processing key {0}".format(key), file=sys.stderr, loglevel=LOG_DEBUG)
 
       if "pub" not in config:
         continue
@@ -786,26 +806,36 @@ class AgentManager(object):
     console = GetSessionTty()
 
     if len(file_keys) > 0:
-      print("Loading key '{0}' in agent".format(file_keys), loglevel=LOG_DEBUG)
+      print("Loading key '{0}' in agent".format(file_keys), file=sys.stderr, loglevel=LOG_INFO)
 
       self.RunShellCommandInAgent(
         self.agent_file, "ssh-add {0} {1}".format(options, file_keys),
         stdout=console, stdin=console)
 
-    for pkcs11 in [self.GetPublicKeyFile(x) for x in keys
+    for pkcs11_libs in [self.GetPublicKeyFile(x) for x in keys
                    if self.IsPKCS11Library(self.GetPublicKeyFile(x))]:
+
+      # If multiple paths have been specified with a comma, we try to load them
+      # in order of appearance and we will go on with the first one that exists
+      # in the filesystem
+      for library in pkcs11_libs.split(","):
+        if (not os.path.exists(library)):
+          print("Ignoring non-existent library {0}".format(library), file=sys.stderr,
+          loglevel=LOG_DEBUG)
+          continue
+
       # When a pkcs11 key expires, it is removed from the agent but
       # the token is not removed from the agent.  Trying to add the
       # token again will fail. Therefore, we need to try to remove the
       # card from the agent before adding it again, as ssh-add does
       # not offer any way to check if a token is loaded or not.
-      print("Adding pkcs11 library {0}".format(pkcs11), file=sys.stderr,
+      print("Adding library library {0}".format(library), file=sys.stderr,
           loglevel=LOG_DEBUG)
       self.RunShellCommandInAgent(
-        self.agent_file, "ssh-add {0} -e {1}".format(options, pkcs11),
+        self.agent_file, "ssh-add {0} -e {1}".format(options, library),
         stdout=console, stdin=console)
       self.RunShellCommandInAgent(
-        self.agent_file, "ssh-add {0} -s {1}".format(options, pkcs11),
+        self.agent_file, "ssh-add {0} -s {1}".format(options, library),
         stdout=console, stdin=console)
 
   def GetLoadedKeys(self):
@@ -832,10 +862,10 @@ class AgentManager(object):
   def GetPublicKeyFile(key):
     """Returns the file name of a public key as a string."""
     return AgentManager.GetPublicKeyData(key)["file"]
-  
+
   @staticmethod
   def GetPublicKeyData(key):
-    """Returns the information from a public key file as returned by 
+    """Returns the information from a public key file as returned by
     ssh-keygen -l
     Returns:
       An dict with the four elements of the key: length, fingerprint,
@@ -853,39 +883,56 @@ class AgentManager(object):
     return {"length": length, "fingerprint": fingerprint,
             "file": file, "protocol": protocol}
 
-  @staticmethod
-  def GetAgentFile(path, identity):
-    """Returns the path to an agent config file.
-
-    Args:
-      path: string, the path where agent config files are kept.
-      identity: string, identity for which to load the agent.
+  def GetAgentFileAndLaunchAgent(self):
+    """Returns the path to an agent config file. Checks that the agent associated
+    with the file is operational and, if it is not, a new agent will be launched
 
     Returns:
       string, path to the agent file.
     """
     # Create the paths, if they do not exist yet.
     try:
-      os.makedirs(path, 0o700)
+      os.makedirs(self.agents_path, 0o700)
     except OSError as e:
       if e.errno != errno.EEXIST:
         raise OSError(
             "Cannot create agents directory, try manually with "
-            "'mkdir -p {0}'".format(path))
+            "'mkdir -p {0}'".format(self.path))
 
     # Use the hostname as part of the path just in case this is on NFS.
     agentfile = os.path.join(
-        path, "agent-{0}-{1}".format(identity, socket.gethostname()))
+        self.agents_path, "agent-{0}-{1}".format(self.identity, socket.gethostname()))
     if os.access(agentfile, os.R_OK) and AgentManager.IsAgentFileValid(agentfile):
-      print("Agent for identity {0} ready".format(identity), file=sys.stderr,
+      print("Agent for identity {0} ready".format(self.identity), file=sys.stderr,
           loglevel=LOG_DEBUG)
       return agentfile
 
-    print("Preparing new agent for identity {0}".format(identity), file=sys.stderr,
-        loglevel=LOG_DEBUG)
-    retval = subprocess.call(
-        ["/usr/bin/env", "-i", "/bin/sh", "-c", "ssh-agent > {0}".format(agentfile)])
+    retval = self.LaunchAgent(agentfile)
+
+    if (0 != retval):
+      print("Error while Turing to launch the agent. Error code: {0} ready".format(retval), file=sys.stderr,
+            loglevel=LOG_ERROR)
+      sys.exit(1)
+
     return agentfile
+
+  def LaunchAgent(self, agentfile):
+    """Launch a new agent
+
+    Args:
+      agentfile: The file for the agent to write the environment
+        information in
+
+    Returns:
+      integer, the os return code while trying to launch the agent
+
+    """
+    print("Preparing new agent for identity {0}".format(self.identity), file=sys.stderr,
+          loglevel=LOG_INFO)
+
+    retval = subprocess.call(
+        ["/usr/bin/env", "-i", "/bin/sh", "-c", "ssh-agent {0} > {1}".format(self.config.Get("SSH_AGENT_DEFAULT_OPTIONS"), agentfile)])
+    return retval
 
   @staticmethod
   def IsAgentFileValid(agentfile):
@@ -950,11 +997,18 @@ def AutodetectBinary(argv, config):
   # If BINARY_SSH is set by the user, respect that and do nothing.
   if config.Get("BINARY_SSH"):
     print("Will run '{0}' as ssh binary - set by user via BINARY_SSH"
-          .format(config.Get("BINARY_SSH")), loglevel=LOG_DEBUG)
+          .format(config.Get("BINARY_SSH")), file=sys.stderr, loglevel=LOG_DEBUG)
     return
 
   # If BINARY_DIR is set, look for the binary in this directory.
   runtime_name = argv[0]
+
+  # Never try to use ourselves as the ssh binary to avoid loops. In some cases
+  # the protection below to detect loops was not working properly in complex
+  # scenarios, so this is an additional protection mechanism
+  if runtime_name.endswith('ssh-ident'):
+    runtime_name = "ssh"
+
   if config.Get("BINARY_DIR"):
     binary_name = os.path.basename(runtime_name)
     binary_path = os.path.join(config.Get("BINARY_DIR"), binary_name)
@@ -963,7 +1017,7 @@ def AutodetectBinary(argv, config):
 
     config.Set("BINARY_SSH", binary_path)
     print("Will run '{0}' as ssh binary - detected based on BINARY_DIR"
-          .format(config.Get("BINARY_SSH")), loglevel=LOG_DEBUG)
+          .format(config.Get("BINARY_SSH")), file=sys.stderr, loglevel=LOG_DEBUG)
     return
 
   # argv[0] could be pretty much anything the caller decides to set
