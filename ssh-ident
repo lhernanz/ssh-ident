@@ -824,19 +824,19 @@ class AgentManager(object):
           loglevel=LOG_DEBUG)
           continue
 
-      # When a pkcs11 key expires, it is removed from the agent but
-      # the token is not removed from the agent.  Trying to add the
-      # token again will fail. Therefore, we need to try to remove the
-      # card from the agent before adding it again, as ssh-add does
-      # not offer any way to check if a token is loaded or not.
-      print("Adding library library {0}".format(library), file=sys.stderr,
-          loglevel=LOG_DEBUG)
-      self.RunShellCommandInAgent(
-        self.agent_file, "ssh-add {0} -e {1}".format(options, library),
-        stdout=console, stdin=console)
-      self.RunShellCommandInAgent(
-        self.agent_file, "ssh-add {0} -s {1}".format(options, library),
-        stdout=console, stdin=console)
+        # When a pkcs11 key expires, it is removed from the agent but
+        # the token is not removed from the agent.  Trying to add the
+        # token again will fail. Therefore, we need to try to remove the
+        # card from the agent before adding it again, as ssh-add does
+        # not offer any way to check if a token is loaded or not.
+        print("Adding library library {0}".format(library), file=sys.stderr,
+              loglevel=LOG_DEBUG)
+        self.RunShellCommandInAgent(
+          self.agent_file, "ssh-add {0} -e {1}".format(options, library),
+          stdout=console, stdin=console)
+        self.RunShellCommandInAgent(
+          self.agent_file, "ssh-add {0} -s {1}".format(options, library),
+          stdout=console, stdin=console)
 
   def GetLoadedKeys(self):
     """Returns an iterable of strings, each the fingerprint of a loaded key."""
