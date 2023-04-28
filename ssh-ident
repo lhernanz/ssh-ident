@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# vim: tabstop=2 shiftwidth=2 expandtab
+# -*- python-indent-offset:2 -*- vim: tabstop=2 shiftwidth=2 expandtab
 """Start and use ssh-agent and load identities as necessary.
 
 Use this script to start ssh-agents and load ssh keys on demand,
@@ -531,6 +531,7 @@ class Config(object):
     """Sets configuration option parameter to value."""
     self.values[parameter] = value
 
+
 def FindIdentityInList(elements, identities):
   """Matches a list of identities to a list of elements.
 
@@ -549,6 +550,7 @@ def FindIdentityInList(elements, identities):
         return identity
   return None
 
+
 def FindIdentity(argv, config):
   """Returns the identity to use based on current directory or argv.
 
@@ -565,6 +567,7 @@ def FindIdentity(argv, config):
       FindIdentityInList(argv, config.Get("MATCH_ARGV")) or
       FindIdentityInList(paths, config.Get("MATCH_PATH")) or
       config.Get("DEFAULT_IDENTITY"))
+
 
 def FindKeys(identity, config):
   """Finds all the private and public keys associated with an identity.
@@ -671,7 +674,7 @@ def GetSessionTty():
   tell us anything about the session having a /dev/tty associated
   or not.
 
-  For example, running 
+  For example, running
 
     ssh -t user@remotehost './test.sh < /dev/null > /dev/null'
 
@@ -731,8 +734,8 @@ class AgentManager(object):
     """
     toload = self.FindUnloadedKeys(keys)
     if toload:
-      print("Loading keys:\n    {0}".format( "\n    ".join(toload)),
-          file=sys.stderr, loglevel=LOG_INFO)
+      print("Loading keys:\n    {0}".format("\n    ".join(toload)),
+            file=sys.stderr, loglevel=LOG_INFO)
       self.LoadKeyFiles(toload)
     else:
       print("All keys already loaded", file=sys.stderr, loglevel=LOG_INFO)
@@ -813,16 +816,20 @@ class AgentManager(object):
         stdout=console, stdin=console)
 
     for pkcs11_libs in [self.GetPublicKeyFile(x) for x in keys
-                   if self.IsPKCS11Library(self.GetPublicKeyFile(x))]:
+                        if self.IsPKCS11Library(self.GetPublicKeyFile(x))]:
 
       # If multiple paths have been specified with a comma, we try to load them
       # in order of appearance and we will go on with the first one that exists
       # in the filesystem
-      for library in pkcs11_libs.split(","):
-        if (not os.path.exists(library)):
+      for library in Config.Expand(pkcs11_libs).split(","):
+        if (len(glob.glob(library)) == 0):
           print("Ignoring non-existent library {0}".format(library), file=sys.stderr,
           loglevel=LOG_DEBUG)
           continue
+
+        # ssh-agent security model does not accept to load a link pointing to a different dir
+        if(os.path.islink(library)):
+          library = os.path.realpath(library)
 
         # When a pkcs11 key expires, it is removed from the agent but
         # the token is not removed from the agent.  Trying to add the
@@ -910,7 +917,7 @@ class AgentManager(object):
     retval = self.LaunchAgent(agentfile)
 
     if (0 != retval):
-      print("Error while Turing to launch the agent. Error code: {0} ready".format(retval), file=sys.stderr,
+      print("Error while Trying to launch the agent. Error code: {0} ready".format(retval), file=sys.stderr,
             loglevel=LOG_ERROR)
       sys.exit(1)
 
@@ -991,6 +998,7 @@ class AgentManager(object):
             additional_flags, self.EscapeShellArguments(argv))]
     os.execv("/bin/sh", command)
 
+
 def AutodetectBinary(argv, config):
   """Detects the correct binary to run and sets BINARY_SSH accordingly,
   if it is not already set."""
@@ -1032,7 +1040,7 @@ def AutodetectBinary(argv, config):
   # The logic here is pretty straightforward:
   # - Try to eliminate the path of ssh-ident from PATH.
   # - Search for a binary with the same name of ssh-ident to run.
-  # 
+  #
   # If this fails, we may end up in some sort of loop, where ssh-ident
   # tries to run itself. This should normally be detected later on,
   # where the code checks for the next binary to run.
@@ -1084,7 +1092,7 @@ def AutodetectBinary(argv, config):
     ssh-ident was invoked in place of the binary {0} (determined from argv[0]).
     Neither this binary nor 'ssh' could be found in $PATH.
 
-      PATH="{1}" 
+      PATH="{1}"
 
     You need to adjust your setup for ssh-ident to work: consider setting
     BINARY_SSH or BINARY_DIR in your config, or running ssh-ident some
