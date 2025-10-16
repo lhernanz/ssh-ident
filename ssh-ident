@@ -692,10 +692,13 @@ def GetSessionTty():
   """
   try:
     fd = open("/dev/tty", "r")
-    fcntl.ioctl(fd, termios.TIOCGPGRP, "  ")
-  except IOError:
+    # Create a proper buffer for the process group ID (4 bytes)
+    import struct
+    pgrp_buf = struct.pack('i', 0)  # 4-byte integer buffer
+    fcntl.ioctl(fd, termios.TIOCGPGRP, pgrp_buf)
+    return fd
+  except OSError:
     return None
-  return fd
 
 
 class AgentManager(object):
