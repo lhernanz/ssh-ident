@@ -341,7 +341,7 @@ CREDITS
 - Carl Drougge, https://www.github.com/drougge, CVE-2016-0777 fix,
   fix for per user config files, and use /bin/env instead of python
   path.
-- Luis Hernanz, https://www.github.com/drougge, for pkcs11 support.
+- Luis Hernanz, https://www.github.com/lhernanz, for pkcs11 support.
 
 """
 
@@ -792,7 +792,22 @@ class AgentManager(object):
 
       fingerprint = self.GetPublicKeyFingerprint(config["pub"])
       if fingerprint in loaded:
-        continue
+        console = GetSessionTty()
+        return_code, _ = self.RunShellCommandInAgent(
+          self.agent_file,
+          "ssh-add -T {0}".format(key),
+          stdout=console)
+        if return_code > 0:
+          print(
+            "Testing key {0} failed. Killing agent".format(key),
+            file=sys.stderr,
+            loglevel=LOG_WARN,
+          )
+          self.RunShellCommandInAgent(
+            self.agent_file, "ssh-agent -k", stdout=console
+          )
+        else:
+          continue
 
       toload.add(config["priv"])
     return toload
@@ -841,9 +856,9 @@ class AgentManager(object):
         # not offer any way to check if a token is loaded or not.
         print("Adding library library {0}".format(library), file=sys.stderr,
               loglevel=LOG_DEBUG)
-        self.RunShellCommandInAgent(
-          self.agent_file, "ssh-add {0} -e {1}".format(options, library),
-          stdout=console, stdin=console)
+        # self.RunShellCommandInAgent(
+        #   self.agent_file, "ssh-add {0} -e {1}".format(options, library),
+        #   stdout=console, stdin=console)
         self.RunShellCommandInAgent(
           self.agent_file, "ssh-add {0} -s {1}".format(options, library),
           stdout=console, stdin=console)
